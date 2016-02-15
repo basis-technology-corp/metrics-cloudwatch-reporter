@@ -30,6 +30,8 @@ import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.ScheduledReporter;
 import com.codahale.metrics.Snapshot;
 import com.codahale.metrics.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -42,6 +44,7 @@ import java.util.concurrent.TimeUnit;
  *
  */
 public final class CloudWatchReporter extends ScheduledReporter {
+    private static final Logger LOG = LoggerFactory.getLogger(CloudWatchReporter.class);
 
     private final AmazonCloudWatchClient client;
     private final String namespace;
@@ -71,11 +74,14 @@ public final class CloudWatchReporter extends ScheduledReporter {
         Collection<MetricDatum> data = new ArrayList<>();
         for (Map.Entry<String, Gauge> meg : gauges.entrySet()) {
             if (meg.getValue().getValue() instanceof Number) {
-                double val = ((Number)meg.getValue()).doubleValue();
+                Number num = (Number)meg.getValue().getValue();
+                double val = num.doubleValue();
+                LOG.debug(String.format("gauge %s val %f", meg.getKey(), val));
                 data.add(new MetricDatum().withMetricName(meg.getKey()).withValue(val).withDimensions(dimensions));
             }
         }
         for (Map.Entry<String, Counter> mec : counters.entrySet()) {
+            LOG.debug(String.format("counter %s val %d", mec.getKey(), mec.getValue().getCount()));
             data.add(new MetricDatum().withMetricName(mec.getKey()).withValue((double) mec.getValue().getCount())
                      .withDimensions(dimensions));
         }
@@ -89,6 +95,7 @@ public final class CloudWatchReporter extends ScheduledReporter {
                     .withMinimum((double) snapshot.getMin())
                     .withSum(sum)
                     .withSampleCount((double) snapshot.getValues().length);
+            LOG.debug(String.format("histogram %s: %s", meh.getKey(), stats));
             data.add(new MetricDatum().withMetricName(meh.getKey())
                     .withDimensions(dimensions)
                     .withStatisticValues(stats));
@@ -104,6 +111,7 @@ public final class CloudWatchReporter extends ScheduledReporter {
                     .withMinimum((double) snapshot.getMin())
                     .withSum(sum)
                     .withSampleCount((double) snapshot.getValues().length);
+            LOG.debug(String.format("timer %s %s", met.getKey(), stats));
             data.add(new MetricDatum().withMetricName(met.getKey())
                     .withDimensions(dimensions)
                     .withStatisticValues(stats));
@@ -112,7 +120,12 @@ public final class CloudWatchReporter extends ScheduledReporter {
         PutMetricDataRequest put = new PutMetricDataRequest();
         put.setNamespace(namespace);
         put.setMetricData(data);
-        client.putMetricData(put);
+        LOG.debug("About to put some metrics");
+        try {
+            client.putMetricData(put);
+        } catch (Throwable t) {
+            LOG.error("Failed to put metrics", t);
+        }
     }
 
     public static class Builder {

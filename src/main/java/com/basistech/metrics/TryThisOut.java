@@ -91,6 +91,10 @@ public class TryThisOut {
 
     public static void main(String[] args) throws Exception {
         TryThisOut tto = new TryThisOut();
-        tto.wait();
+        synchronized (tto) {
+            while (true) {
+                tto.wait();
+            }
+        }
     }
 }
