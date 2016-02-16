@@ -20,6 +20,7 @@ import com.amazonaws.services.cloudwatch.AmazonCloudWatchClient;
 import com.amazonaws.services.cloudwatch.model.Dimension;
 import com.amazonaws.services.cloudwatch.model.MetricDatum;
 import com.amazonaws.services.cloudwatch.model.PutMetricDataRequest;
+import com.amazonaws.services.cloudwatch.model.StandardUnit;
 import com.amazonaws.services.cloudwatch.model.StatisticSet;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -41,7 +42,28 @@ import java.util.SortedMap;
 import java.util.concurrent.TimeUnit;
 
 /**
+ * Metrics reporter for Amazon CloudWatch.
+ * Use {@link CloudWatchReporter.Builder} to construct instances of this class.
  *
+ * This reporter implements a simple mapping from Metrics to CloudWatch, and there is room for more
+ * sophistication. The reporter applies a single set of dimensions to all of the metrics.
+ *
+ * The mappings are as follows:
+ *<dl>
+ * <dt>Gauge</dt>
+ * <dd>If the value of the gauge is some subclass of `Number`, the value is reported. No unit is attached.</dd>
+ * <dt>Counter</dt>
+ * <dd>The value is reported. No unit is attached.</dd>
+ * <dt>Histogram</dt>
+ * <dd>The reporter prepares a `StatisticSet` with the values, min, max, and sum available from the reservoir.
+ It does not report the percentiles, leaving it to CloudWatch to aggregate. This may not be very useful.</dd>
+ * <dt>Timer</dt>
+ * <dd>The reporter prepares a `StatisticSet` with the values, min, max, and sum available from the reservoir,
+ * converted to Microseconds, since that's the smallest unit that CloudWatch knows about. This may not be very useful.
+ * </dd>
+ *</dl>
+ * My suspicion is that the primary use of this is to use a gauge as an ASG trigger, letting CloudWatch do the
+ * aggregation.
  */
 public final class CloudWatchReporter extends ScheduledReporter {
     private static final Logger LOG = LoggerFactory.getLogger(CloudWatchReporter.class);
@@ -76,12 +98,16 @@ public final class CloudWatchReporter extends ScheduledReporter {
             if (meg.getValue().getValue() instanceof Number) {
                 Number num = (Number)meg.getValue().getValue();
                 double val = num.doubleValue();
-                LOG.debug(String.format("gauge %s val %f", meg.getKey(), val));
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("gauge {} val {}", meg.getKey(), val);
+                }
                 data.add(new MetricDatum().withMetricName(meg.getKey()).withValue(val).withDimensions(dimensions));
             }
         }
         for (Map.Entry<String, Counter> mec : counters.entrySet()) {
-            LOG.debug(String.format("counter %s val %d", mec.getKey(), mec.getValue().getCount()));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("counter {} val {}", mec.getKey(), mec.getValue().getCount());
+            }
             data.add(new MetricDatum().withMetricName(mec.getKey()).withValue((double) mec.getValue().getCount())
                      .withDimensions(dimensions));
         }
@@ -95,7 +121,9 @@ public final class CloudWatchReporter extends ScheduledReporter {
                     .withMinimum((double) snapshot.getMin())
                     .withSum(sum)
                     .withSampleCount((double) snapshot.getValues().length);
-            LOG.debug(String.format("histogram %s: %s", meh.getKey(), stats));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("histogram {}: {}", meh.getKey(), stats);
+            }
             data.add(new MetricDatum().withMetricName(meh.getKey())
                     .withDimensions(dimensions)
                     .withStatisticValues(stats));
@@ -107,20 +135,26 @@ public final class CloudWatchReporter extends ScheduledReporter {
             for (double val : snapshot.getValues()) {
                 sum += val;
             }
-            StatisticSet stats = new StatisticSet().withMaximum((double) snapshot.getMax())
-                    .withMinimum((double) snapshot.getMin())
-                    .withSum(sum)
+            // Metrics works in Nanoseconds, which is not one of Amazon's favorites.
+            double max = (double)TimeUnit.NANOSECONDS.toMicros(snapshot.getMax());
+            double min = (double)TimeUnit.NANOSECONDS.toMicros(snapshot.getMin());
+            double sumMicros = TimeUnit.NANOSECONDS.toMicros((long)sum);
+            StatisticSet stats = new StatisticSet()
+                    .withMaximum(max)
+                    .withMinimum(min)
+                    .withSum(sumMicros)
                     .withSampleCount((double) snapshot.getValues().length);
-            LOG.debug(String.format("timer %s %s", met.getKey(), stats));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("timer {}: {}", met.getKey(), stats);
+            }
             data.add(new MetricDatum().withMetricName(met.getKey())
                     .withDimensions(dimensions)
-                    .withStatisticValues(stats));
-
+                    .withStatisticValues(stats)
+                    .withUnit(StandardUnit.Microseconds));
         }
         PutMetricDataRequest put = new PutMetricDataRequest();
         put.setNamespace(namespace);
         put.setMetricData(data);
-        LOG.debug("About to put some metrics");
         try {
             client.putMetricData(put);
         } catch (Throwable t) {
@@ -128,6 +162,9 @@ public final class CloudWatchReporter extends ScheduledReporter {
         }
     }
 
+    /**
+     * Builder class for the reporter.
+     */
     public static class Builder {
         MetricRegistry registry;
         AmazonCloudWatchClient client;
@@ -137,6 +174,11 @@ public final class CloudWatchReporter extends ScheduledReporter {
         MetricFilter filter;
         Map<String, String> dimensions;
 
+        /**
+         * Set up the builder.
+         * @param registry which registry to report from.
+         * @param client a client to use to push the metrics to CloudWatch.
+         */
         public Builder(MetricRegistry registry, AmazonCloudWatchClient client) {
             this.registry = registry;
             this.client = client;
@@ -146,31 +188,62 @@ public final class CloudWatchReporter extends ScheduledReporter {
             this.dimensions = new HashMap<>();
         }
 
-        public Builder setNamespace(String namespace) {
+        /**
+         * Set the namespace.
+         * @param namespace the namespace.
+         * @return this.
+         */
+        public Builder namespace(String namespace) {
             this.namespace = namespace;
             return this;
         }
 
-        public Builder setRateUnit(TimeUnit rateUnit) {
+        /**
+         * Set the rate unit.
+         * @param rateUnit the rate unit. The default is {@link TimeUnit#SECONDS}.
+         * @return this
+         */
+        public Builder rateUnit(TimeUnit rateUnit) {
             this.rateUnit = rateUnit;
             return this;
         }
 
-        public Builder setDurationUnit(TimeUnit durationUnit) {
+        /**
+         * Set the duration unit.
+         * @param durationUnit the duration unit. The default is {@link TimeUnit#MILLISECONDS}.
+         * @return this
+         */
+        public Builder durationUnit(TimeUnit durationUnit) {
             this.durationUnit = durationUnit;
             return this;
         }
 
-        public Builder setFilter(MetricFilter filter) {
+        /**
+         * Set the filter.
+         * @param filter The filter. Default is no filter; all metrics are reported.
+         * @return this.
+         */
+        public Builder filter(MetricFilter filter) {
             this.filter = filter;
             return this;
         }
 
-        public Builder addDimensions(String key, String value) {
+        /**
+         * Add a single dimension to the collection of dimensions for all the metrics
+         * reported by this reporter.
+         * @param key Dimension name.
+         * @param value Dimension value.
+         * @return this.
+         */
+        public Builder dimension(String key, String value) {
             this.dimensions.put(key, value);
             return this;
         }
 
+        /**
+         * Construct the reporter.
+         * @return the reporter.
+         */
         public CloudWatchReporter build() {
             return new CloudWatchReporter(registry, client, namespace, rateUnit,
                     durationUnit, filter, dimensions);

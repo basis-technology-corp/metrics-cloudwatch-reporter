@@ -67,8 +67,8 @@ public class TryThisOut {
         // try out the default constructor.
         AmazonCloudWatchClient client = new AmazonCloudWatchClient();
         reporter = new CloudWatchReporter.Builder(registry, client)
-                .addDimensions("instanceId", instanceId)
-                .setNamespace("some-namespace")
+                .dimension("instanceId", instanceId)
+                .namespace("some-namespace")
                 .build();
         reporter.start(5, TimeUnit.SECONDS);
 
