@@ -71,17 +71,20 @@ public final class CloudWatchReporter extends ScheduledReporter {
     private final AmazonCloudWatchClient client;
     private final String namespace;
     private final Collection<Dimension> dimensions;
+    private final boolean reportAggregates;
 
     private CloudWatchReporter(MetricRegistry registry,
                                AmazonCloudWatchClient client,
                                String namespace,
                                TimeUnit rateUnit,
                                TimeUnit durationUnit,
+                               boolean reportAggregates,
                                MetricFilter filter, Map<String, String> dimensions) {
         super(registry, "cloudwatch-reporter", filter, rateUnit, durationUnit);
         this.client = client;
         this.namespace = namespace;
         this.dimensions = new ArrayList<>();
+        this.reportAggregates = reportAggregates;
         for (Map.Entry<String, String> me : dimensions.entrySet()) {
             this.dimensions.add(new Dimension().withName(me.getKey()).withValue(me.getValue()));
         }
@@ -112,7 +115,81 @@ public final class CloudWatchReporter extends ScheduledReporter {
                      .withDimensions(dimensions));
         }
         for (Map.Entry<String, Histogram> meh : histograms.entrySet()) {
-            Snapshot snapshot = meh.getValue().getSnapshot();
+            reportHistogram(data, meh);
+        }
+        for (Map.Entry<String, Timer> met : timers.entrySet()) {
+            reportTimer(met.getKey(), data, met);
+        }
+        PutMetricDataRequest put = new PutMetricDataRequest();
+        put.setNamespace(namespace);
+        put.setMetricData(data);
+        try {
+            client.putMetricData(put);
+        } catch (Throwable t) {
+            LOG.error("Failed to put metrics", t);
+        }
+    }
+
+    private void reportTimer(String key, Collection<MetricDatum> data, Map.Entry<String, Timer> met) {
+        Timer timer = met.getValue();
+        Snapshot snapshot = timer.getSnapshot();
+        if (reportAggregates) {
+            reportAggregate(key, data, "count", null, timer.getCount());
+            reportAggregate(key, data, "rate", "1minute", timer.getOneMinuteRate());
+            reportAggregate(key, data, "rate", "5minute", timer.getFiveMinuteRate());
+            reportAggregate(key, data, "rate", "15minute", timer.getFifteenMinuteRate());
+            reportAggregate(key, data, "rate", "mean", timer.getMeanRate());
+            reportSnapshot(data, snapshot, key);
+        } else {
+            // if no data, don't bother Amazon with it.
+            if (snapshot.size() == 0) {
+                return;
+            }
+            double sum = 0;
+            for (double val : snapshot.getValues()) {
+                sum += val;
+            }
+            // Metrics works in Nanoseconds, which is not one of Amazon's favorites.
+            double max = (double) TimeUnit.NANOSECONDS.toMicros(snapshot.getMax());
+            double min = (double) TimeUnit.NANOSECONDS.toMicros(snapshot.getMin());
+            double sumMicros = TimeUnit.NANOSECONDS.toMicros((long) sum);
+            StatisticSet stats = new StatisticSet()
+                    .withMaximum(max)
+                    .withMinimum(min)
+                    .withSum(sumMicros)
+                    .withSampleCount((double) snapshot.getValues().length);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("timer {}: {}", met.getKey(), stats);
+            }
+            data.add(new MetricDatum().withMetricName(met.getKey())
+                    .withDimensions(dimensions)
+                    .withStatisticValues(stats)
+                    .withUnit(StandardUnit.Microseconds));
+        }
+    }
+
+    private void reportAggregate(String key, Collection<MetricDatum> data, String valDimName,
+                                 String valDimValue, double value) {
+        Collection<Dimension> fullDimensions = new ArrayList<>();
+        fullDimensions.addAll(dimensions);
+        fullDimensions.add(new Dimension().withName(valDimName).withValue(valDimValue));
+        data.add(new MetricDatum().withMetricName(key)
+                .withDimensions(fullDimensions)
+                .withValue(value));
+
+    }
+
+    private void reportHistogram(Collection<MetricDatum> data, Map.Entry<String, Histogram> meh) {
+        Snapshot snapshot = meh.getValue().getSnapshot();
+
+        if (reportAggregates) {
+            String key = meh.getKey();
+            reportSnapshot(data, snapshot, key);
+        } else {
+            // if no data, don't bother Amazon with it.
+            if (snapshot.size() == 0) {
+                return;
+            }
             double sum = 0;
             for (double val : snapshot.getValues()) {
                 sum += val;
@@ -128,38 +205,18 @@ public final class CloudWatchReporter extends ScheduledReporter {
                     .withDimensions(dimensions)
                     .withStatisticValues(stats));
         }
-        for (Map.Entry<String, Timer> met : timers.entrySet()) {
-            Timer timer = met.getValue();
-            Snapshot snapshot = timer.getSnapshot();
-            double sum = 0;
-            for (double val : snapshot.getValues()) {
-                sum += val;
-            }
-            // Metrics works in Nanoseconds, which is not one of Amazon's favorites.
-            double max = (double)TimeUnit.NANOSECONDS.toMicros(snapshot.getMax());
-            double min = (double)TimeUnit.NANOSECONDS.toMicros(snapshot.getMin());
-            double sumMicros = TimeUnit.NANOSECONDS.toMicros((long)sum);
-            StatisticSet stats = new StatisticSet()
-                    .withMaximum(max)
-                    .withMinimum(min)
-                    .withSum(sumMicros)
-                    .withSampleCount((double) snapshot.getValues().length);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("timer {}: {}", met.getKey(), stats);
-            }
-            data.add(new MetricDatum().withMetricName(met.getKey())
-                    .withDimensions(dimensions)
-                    .withStatisticValues(stats)
-                    .withUnit(StandardUnit.Microseconds));
-        }
-        PutMetricDataRequest put = new PutMetricDataRequest();
-        put.setNamespace(namespace);
-        put.setMetricData(data);
-        try {
-            client.putMetricData(put);
-        } catch (Throwable t) {
-            LOG.error("Failed to put metrics", t);
-        }
+    }
+
+    private void reportSnapshot(Collection<MetricDatum> data, Snapshot snapshot, String key) {
+        reportAggregate(key, data, "percentile", "75", snapshot.get75thPercentile());
+        reportAggregate(key, data, "percentile", "95", snapshot.get95thPercentile());
+        reportAggregate(key, data, "percentile", "99", snapshot.get99thPercentile());
+        reportAggregate(key, data, "percentile", "99.9", snapshot.get999thPercentile());
+        reportAggregate(key, data, "minimum", null, snapshot.getMin());
+        reportAggregate(key, data, "maximum", null, snapshot.getMax());
+        reportAggregate(key, data, "mean", null, snapshot.getMean());
+        reportAggregate(key, data, "median", null, snapshot.getMedian());
+        reportAggregate(key, data, "standardDev", null, snapshot.getStdDev());
     }
 
     /**
@@ -173,6 +230,7 @@ public final class CloudWatchReporter extends ScheduledReporter {
         TimeUnit durationUnit;
         MetricFilter filter;
         Map<String, String> dimensions;
+        boolean reportAggregates;
 
         /**
          * Set up the builder.
@@ -229,6 +287,18 @@ public final class CloudWatchReporter extends ScheduledReporter {
         }
 
         /**
+         * Control how the reporter handles histograms and timers. The choice
+         * is between reporting the raw data from the reservoir {@code false} or
+         * reporting the percentiles, etc {@code true}.
+         * @param reportAggregates what to do.
+         * @return this.
+         */
+        public Builder reportAggregates(boolean reportAggregates) {
+            this.reportAggregates = reportAggregates;
+            return this;
+        }
+
+        /**
          * Add a single dimension to the collection of dimensions for all the metrics
          * reported by this reporter.
          * @param key Dimension name.
@@ -246,7 +316,8 @@ public final class CloudWatchReporter extends ScheduledReporter {
          */
         public CloudWatchReporter build() {
             return new CloudWatchReporter(registry, client, namespace, rateUnit,
-                    durationUnit, filter, dimensions);
+                    durationUnit, reportAggregates,
+                    filter, dimensions);
         }
     }
 }
