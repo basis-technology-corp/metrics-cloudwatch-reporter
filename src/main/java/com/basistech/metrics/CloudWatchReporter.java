@@ -120,13 +120,16 @@ public final class CloudWatchReporter extends ScheduledReporter {
         for (Map.Entry<String, Timer> met : timers.entrySet()) {
             reportTimer(met.getKey(), data, met);
         }
-        PutMetricDataRequest put = new PutMetricDataRequest();
-        put.setNamespace(namespace);
-        put.setMetricData(data);
-        try {
-            client.putMetricData(put);
-        } catch (Throwable t) {
-            LOG.error("Failed to put metrics", t);
+
+        if (!data.isEmpty()) {
+            PutMetricDataRequest put = new PutMetricDataRequest();
+            put.setNamespace(namespace);
+            put.setMetricData(data);
+            try {
+                client.putMetricData(put);
+            } catch (Throwable t) {
+                LOG.error("Failed to put metrics", t);
+            }
         }
     }
 
