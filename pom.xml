@@ -40,6 +40,7 @@
     <url>http://basis-technology-corp.github.io/metrics-cloudwatch-reporter</url>
     <properties>
       <metrics-version>3.1.2</metrics-version>
+        <servicemix-aws-sdk-version>1.11.18_1</servicemix-aws-sdk-version>
     </properties>
     <dependencies>
       <dependency>
@@ -48,14 +49,15 @@
         <version>${metrics-version}</version>
       </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-cloudwatch</artifactId>
-            <version>1.10.27</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-core</artifactId>
-            <version>1.10.27</version>
+            <groupId>org.apache.servicemix.bundles</groupId>
+            <artifactId>org.apache.servicemix.bundles.aws-java-sdk</artifactId>
+            <version>${servicemix-aws-sdk-version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
