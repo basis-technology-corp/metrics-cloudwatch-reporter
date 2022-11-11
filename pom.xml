@@ -40,7 +40,7 @@
     <url>http://basis-technology-corp.github.io/metrics-cloudwatch-reporter</url>
     <properties>
       <metrics-version>3.1.2</metrics-version>
-        <servicemix-aws-sdk-version>1.11.18_1</servicemix-aws-sdk-version>
+        <servicemix-aws-sdk-version>1.12.310_1</servicemix-aws-sdk-version>
     </properties>
     <dependencies>
       <dependency>
