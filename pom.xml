@@ -78,6 +78,18 @@
     </dependencies>
     <build>
         <plugins>
+            <!-- Override out-of-date parent config. -->
+            <plugin>
+                <groupId>org.sonatype.plugins</groupId>
+                <artifactId>nexus-staging-maven-plugin</artifactId>
+                <version>1.6.13</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <serverId>ossrh-releases</serverId>
+                    <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
+                    <autoReleaseAfterClose>false</autoReleaseAfterClose>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>com.basistech</groupId>
                 <artifactId>bbh-maven-plugin</artifactId>
