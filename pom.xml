@@ -18,7 +18,7 @@
     <modelVersion>4.0.0</modelVersion>
     <artifactId>metrics-cloudwatch-reporter</artifactId>
     <name>metrics-cloudwatch-reporter</name>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.1</version>
     <packaging>bundle</packaging>
     <parent>
         <artifactId>open-source-parent</artifactId>
@@ -29,7 +29,7 @@
     <scm>
         <connection>scm:git:git@github.com:basis-technology-corp/metrics-cloudwatch-reporter.git</connection>
         <developerConnection>scm:git:git@github.com:basis-technology-corp/metrics-cloudwatch-reporter.git</developerConnection>
-        <tag>HEAD</tag>
+        <tag>metrics-cloudwatch-reporter-1.0.1</tag>
     </scm>
     <distributionManagement>
         <site>
