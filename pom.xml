@@ -18,12 +18,12 @@
     <modelVersion>4.0.0</modelVersion>
     <artifactId>metrics-cloudwatch-reporter</artifactId>
     <name>metrics-cloudwatch-reporter</name>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.2-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <parent>
         <artifactId>open-source-parent</artifactId>
         <groupId>com.basistech</groupId>
-        <version>0.1.2</version>
+        <version>0.1.2.1</version>
     </parent>
     <description>A 'metrics' reporter for CloudWatch</description>
     <scm>
@@ -40,7 +40,7 @@
     <url>http://basis-technology-corp.github.io/metrics-cloudwatch-reporter</url>
     <properties>
       <metrics-version>3.1.2</metrics-version>
-        <servicemix-aws-sdk-version>1.11.18_1</servicemix-aws-sdk-version>
+        <servicemix-aws-sdk-version>1.12.310_1</servicemix-aws-sdk-version>
     </properties>
     <dependencies>
       <dependency>
